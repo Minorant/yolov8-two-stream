@@ -50,7 +50,7 @@ class TwoStreamDetectionTrainer(BaseTrainer):
                                         path2,
                                         batch,
                                         mode,
-                                        rect=mode == "val",
+                                        rect=False,
                                         stride=gs)
 
     def get_two_stream_dataloader(self, path1, path2, batch_size=16, rank=0, mode="train"):

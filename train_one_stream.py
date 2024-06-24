@@ -1,31 +1,39 @@
+import argparse
 from ultralytics import YOLO
-
+import os
+def parse_args():
+    parser = argparse.ArgumentParser(description="YOLO Training Script")
+    parser.add_argument('--gpu', type=str, default=0, help='CUDA device ID')
+    parser.add_argument('--data', type=str, required=True, help='Path to the data configuration file')
+    parser.add_argument('--project', type=str, default='runs/30_sar', help='Project name')
+    args = parser.parse_args()
+    return args
 if __name__ == '__main__':
-    # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    args = parse_args()
+   # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
     # Load a model
     # torch.backends.cudnn.enabled = True
     # torch.backends.cudnn.benchmark = True
-    model = YOLO(r"./ultralytics/cfg/models/v8/yolov8.yaml", task='detect') \
-             .load("./runs/train/sar_detect2/weights/best.pt")
+    model = YOLO(r"./ultralytics/cfg/models/v8/yolov8.yaml", task='detect')
     # model = YOLO(r'/data1/code/lh/ultralytics-main/ultralytics/models/v8/yolov8.yaml').load("/data1/code/lh/ultralytics-main/runs/train/exp147/weights/best.pt")
     # Trainparameters ----------------------------------------------------------------------------------------------
-    model.train(data=r"./ultralytics/cfg/datasets/0302vehicle_sar.yaml",
+    model.train(data=args.data,
                 # data_sar=r"/data1/code/lh/ultralytics-main/ultralytics/datasets/sar2.yaml",
                 task='detect',
-                epochs=500,  # (int) number of epochs to train for
+                epochs=400,  # (int) number of epochs to train for
                 patience=50,  # (int) epochs to wait for no observable improvement for early stopping of training
                 batch=16,  # (int) number of images per batch (-1 for AutoBatch)
                 imgsz=640,  # (int) size of input images as integer or w,h
-                save=True,  # (bool) save train checkpoints and predict results
+                save=False,  # (bool) save train checkpoints and predict results
                 save_period=50,  # (int) Save checkpoint every x epochs (disabled if < 1)
                 cache=True,  # (bool) True/ram, disk or False. Use cache for data loading
-                device=0,
+                device=args.gpu,
                 # (int | str | list, optional) device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
                 workers=1,  # (int) number of worker threads for data loading (per RANK if DDP)
-                project='runs/train',  # (str, optional) project name
-                name='sar_detect',  # (str, optional) experiment name, results saved to 'project/name' directory
+                project=args.project,  # (str, optional) project name
+                name='exp',  # (str, optional) experiment name, results saved to 'project/name' directory
                 exist_ok=False,  # (bool) whether to overwrite existing experiment
-                pretrained=True,
+                pretrained=False,
                 # (bool | str) whether to use a pretrained model (bool) or a model to load weights from (str)
                 optimizer='SGD',
                 # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]

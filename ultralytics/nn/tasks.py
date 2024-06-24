@@ -47,6 +47,8 @@ from ultralytics.nn.modules import (
     RTDETRDecoder,
     Segment,
     WorldDetect, InitConv,
+    InitConv1,
+    transfusionLayer3
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -976,8 +978,9 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 DWConvTranspose2d,
                 C3x,
                 RepC3,
+                InitConv1,
         ):
-            if m is InitConv:
+            if m is InitConv or m is InitConv1:
                 c1, c2 = 3, args[0]
             else:
                 c1, c2 = ch[f], args[0]
@@ -1023,6 +1026,10 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
         elif m is RTDETRDecoder:  # special case, channels arg must be passed in index 1
             args.insert(1, [ch[x] for x in f])
+        elif m in (transfusionLayer3,):
+            c2=ch[f[0]] +  ch[f[1]]   # inputs: ir & rgb channels double
+            args = [c2,*args[1:]]
+            #args = [*args[:]]
         else:
             c2 = ch[f]
 

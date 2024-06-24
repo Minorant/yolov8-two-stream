@@ -955,6 +955,40 @@ def box_candidates(box1, box2, wh_thr=2, ar_thr=20, area_thr=0.1, eps=1e-16):  #
     return (w2 > wh_thr) & (h2 > wh_thr) & (w2 * h2 / (w1 * h1 + eps) > area_thr) & (ar < ar_thr)  # candidates
 
 
+# def load_image_rgb_ir(self, index):
+#     # loads 1 image from dataset, returns img, original hw, resized hw
+
+#     img_rgb = self.imgs_rgb[index]
+#     img_ir = self.imgs_ir[index]
+#     # img_rgb = None
+#     # img_ir = None
+
+#     if (img_rgb is None) and (img_ir is None):  # not cached
+
+#         path_rgb = self.img_files_rgb[index]
+#         path_ir = self.img_files_ir[index]
+
+#         # # print("load_image_rgb_ir")
+#         # print(path_rgb)
+#         # print(path_ir)
+
+#         img_rgb = cv2.imread(path_rgb)  # BGR
+#         img_ir = cv2.imread(path_ir)  # BGR
+
+#         assert img_rgb is not None, 'Image RGB Not Found ' + path_rgb
+#         assert img_ir is not None, 'Image IR Not Found ' + path_ir
+
+#         h0, w0 = img_rgb.shape[:2]  # orig hw
+#         r = self.img_size / max(h0, w0)  # ratio
+#         if r != 1:  # if sizes are not equal
+#             img_rgb = cv2.resize(img_rgb, (int(w0 * r), int(h0 * r)),
+#                                  interpolation=cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR)
+#             img_ir = cv2.resize(img_ir, (int(w0 * r), int(h0 * r)),
+#                                 interpolation=cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR)
+#         return img_rgb, img_ir, (h0, w0), img_rgb.shape[:2]  # img, hw_original, hw_resized
+#     else:
+#         return self.imgs_rgb[index], self.imgs_ir[index], self.img_hw0_rgb[index], self.img_hw_rgb[
+#             index]  # img, hw_original, hw_resized
 def load_image_rgb_ir(self, index):
     # loads 1 image from dataset, returns img, original hw, resized hw
 
@@ -975,20 +1009,30 @@ def load_image_rgb_ir(self, index):
         img_rgb = cv2.imread(path_rgb)  # BGR
         img_ir = cv2.imread(path_ir)  # BGR
 
-        assert img_rgb is not None, 'Image RGB Not Found ' + path_rgb
-        assert img_ir is not None, 'Image IR Not Found ' + path_ir
+        assert img_rgb is not None, "Image RGB Not Found " + path_rgb
+        assert img_ir is not None, "Image IR Not Found " + path_ir
 
         h0, w0 = img_rgb.shape[:2]  # orig hw
         r = self.img_size / max(h0, w0)  # ratio
         if r != 1:  # if sizes are not equal
-            img_rgb = cv2.resize(img_rgb, (int(w0 * r), int(h0 * r)),
-                                 interpolation=cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR)
-            img_ir = cv2.resize(img_ir, (int(w0 * r), int(h0 * r)),
-                                interpolation=cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR)
+            img_rgb = cv2.resize(
+                img_rgb,
+                (int(w0 * r), int(h0 * r)),
+                interpolation=cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR,
+            )
+            img_ir = cv2.resize(
+                img_ir,
+                (int(w0 * r), int(h0 * r)),
+                interpolation=cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR,
+            )
         return img_rgb, img_ir, (h0, w0), img_rgb.shape[:2]  # img, hw_original, hw_resized
     else:
-        return self.imgs_rgb[index], self.imgs_ir[index], self.img_hw0_rgb[index], self.img_hw_rgb[
-            index]  # img, hw_original, hw_resized
+        return (
+            self.imgs_rgb[index],
+            self.imgs_ir[index],
+            self.img_hw0_rgb[index],
+            self.img_hw_rgb[index],
+        )  # img, hw_original, hw_resized
 
 
 def load_mosaic_RGB_IR(self, index1, index2):

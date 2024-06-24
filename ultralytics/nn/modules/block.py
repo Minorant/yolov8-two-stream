@@ -5,9 +5,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .conv import Conv, DWConv, GhostConv, LightConv, RepConv
+from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
-
+from timm.models.layers import DropPath
+from .triplet_attention import TripletAttention
 __all__ = (
     "Add",
     "Add2",
@@ -82,6 +83,92 @@ class DFL(nn.Module):
         # return self.conv(x.view(b, self.c1, 4, a).softmax(1)).view(b, 4, a)
 
 
+class InitConv1(nn.Module):
+    """Standard convolution with args(ch_in, ch_out, kernel, stride, padding, groups, dilation, activation)."""
+
+    default_act = nn.SiLU()  # default activation
+
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
+        """Initialize Conv layer with given arguments including activation."""
+        super().__init__()
+
+        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
+        self.bn = nn.BatchNorm2d(c2)
+        self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
+
+    def forward(self, x):
+        """Apply convolution, batch normalization and activation to input tensor."""
+        return self.act(self.bn(self.conv(x)))
+
+    def forward_fuse(self, x):
+        """Perform transposed convolution of 2D data."""
+        return self.act(self.conv(x))
+
+class Attention_pure(nn.Module):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.0, proj_drop=0.0):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        # NOTE scale factor was wrong in my original version, can set manually to be compat with prev weights
+        self.scale = qk_scale or head_dim**-0.5
+
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, x):
+        B, N, C = x.shape
+        C = int(C // 3)
+        qkv = x.reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(
+            2, 0, 3, 1, 4
+        )  # [3,B,head,N,C/head]
+        q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
+
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj_drop(x)
+        return x
+
+
+class Cross_Attention_pure(nn.Module):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.0, proj_drop=0.0):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        # NOTE scale factor was wrong in my original version, can set manually to be compat with prev weights
+        self.scale = qk_scale or head_dim**-0.5
+
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, tokens_q, memory_k, memory_v, shape=None):
+        assert shape is not None
+        attn = (tokens_q @ memory_k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        x = (attn @ memory_v).transpose(1, 2).reshape(shape[0], shape[1], shape[2])
+        x = self.proj_drop(x)
+        return x
+class CMlp(nn.Module):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.0):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        self.fc1 = nn.Conv2d(in_features, hidden_features, 1)
+        self.act = act_layer()
+        self.fc2 = nn.Conv2d(hidden_features, out_features, 1)
+        self.drop = nn.Dropout(drop)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
 class Proto(nn.Module):
     """YOLOv8 mask Proto module for segmentation models."""
 
@@ -574,3 +661,254 @@ class BNContrastiveHead(nn.Module):
         w = F.normalize(w, dim=-1, p=2)
         x = torch.einsum("bchw,bkc->bkhw", x, w)
         return x * self.logit_scale.exp() + self.bias
+class transfusionBlock_TriAttn3(nn.Module):
+    def __init__(
+        self,
+        dim,
+        num_heads,
+        downsample=2,
+        mlp_ratio=4.0,
+        qkv_bias=False,
+        qk_scale=None,
+        drop=0.0,
+        attn_drop=0.0,
+        drop_path=0.0,
+        act_layer=nn.GELU,
+        norm_layer=nn.LayerNorm,
+    ):
+        super().__init__()
+        self.halfdim = int(dim // 2)
+        self.pos_embed = nn.Conv2d(dim, dim, 3, padding=1, groups=dim)
+        self.dim = dim
+        self.downsample = downsample
+        self.norm1 = nn.BatchNorm2d(dim)
+        self.norm1_1 = nn.BatchNorm2d(dim)
+        self.norm1_2 = nn.BatchNorm2d(dim)
+        self.conv1 = nn.Conv2d(dim, dim, 1)
+        self.conv1_1 = nn.Conv2d(dim, dim, 1)
+        self.conv1_2 = nn.Conv2d(dim, dim, 1)
+        self.conv2 = nn.Conv2d(3 * self.halfdim, dim, 1)
+        self.num_heads = num_heads
+        self.norm_conv1 = nn.BatchNorm2d(self.halfdim)
+        self.conv = nn.Conv2d(self.halfdim, self.halfdim, 3, padding=1, groups=self.halfdim)
+        self.convdown = nn.Conv2d(dim, self.halfdim, 1)
+        self.norm_ir1 = nn.LayerNorm(self.halfdim)
+        self.channel_up = nn.Linear(self.halfdim, 3 * self.halfdim)
+        self.attn = Attention_pure(
+            self.halfdim,
+            num_heads=self.num_heads,
+            qkv_bias=qkv_bias,
+            qk_scale=qk_scale,
+            attn_drop=0.1,
+            proj_drop=drop,
+        )
+        self.norm_rgb_ir = nn.LayerNorm(self.halfdim)
+        self.channel_up_rgb_ir = nn.Linear(self.halfdim, 3 * self.halfdim)
+        self.attn_rgb_ir = Attention_pure(
+            self.halfdim,
+            num_heads=self.num_heads,
+            qkv_bias=qkv_bias,
+            qk_scale=qk_scale,
+            attn_drop=0.1,
+            proj_drop=drop,
+        )
+        self.cross_attn_rgb = Cross_Attention_pure(
+            self.halfdim,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            qk_scale=qk_scale,
+            attn_drop=0.1,
+            proj_drop=drop,
+        )
+        self.cross_attn_ir = Cross_Attention_pure(
+            self.halfdim,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            qk_scale=qk_scale,
+            attn_drop=0.1,
+            proj_drop=drop,
+        )
+        self.cross_attn_stable_rgb = Cross_Attention_pure(
+            self.halfdim,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            qk_scale=qk_scale,
+            attn_drop=0.1,
+            proj_drop=drop,
+        )
+        self.cross_attn_stable_ir = Cross_Attention_pure(
+            self.halfdim,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            qk_scale=qk_scale,
+            attn_drop=0.1,
+            proj_drop=drop,
+        )
+        self.cross_channel_up_rgb = nn.Conv2d(self.halfdim, 3 * self.halfdim, 1)
+        self.cross_channel_up_ir = nn.Linear(self.halfdim, 3 * self.halfdim)
+        self.cross_channel_up_rgb_ir = nn.Linear(self.halfdim, 3 * self.halfdim)
+        self.norm_conv2 = nn.BatchNorm2d(self.halfdim)
+        self.norm_ir2 = nn.LayerNorm(self.halfdim)
+        self.norm_rgb_ir2 = nn.LayerNorm(self.halfdim)
+        self.fuse_channel_rgb = nn.Linear(self.halfdim, self.halfdim)
+        self.fuse_channel_ir = nn.Linear(self.halfdim, self.halfdim)
+        self.fuse_channel_stable_rgb = nn.Linear(self.halfdim, self.halfdim)
+        self.fuse_channel_stable_ir = nn.Linear(self.halfdim, self.halfdim)
+        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
+        self.norm2 = nn.BatchNorm2d(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = CMlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+
+        ### Add Triplet Attention
+        self.tri_attn_in1=TripletAttention()
+        self.tri_attn_in1_1=TripletAttention()
+        self.tri_attn_in1_2=TripletAttention()
+        self.tri_attn_out=TripletAttention()
+
+    def forward(self, x):
+        B, C, H, W = x[0].shape
+        # concat rgb & ir first
+        x = torch.cat(x, dim=1)  # [B, 2C, H, W]
+        x = x + self.pos_embed(x)  # 3*3 dwconv
+        residual = x
+
+        x = self.norm1(x)
+        x = self.tri_attn_in1(x)
+        x = self.conv1(x)  # 1*1 conv
+
+        x = self.norm1_1(x)
+        x = self.tri_attn_in1_1(x)
+        x = self.conv1_1(x)  # 1*1 conv
+
+        x = self.norm1_2(x)
+        x = self.tri_attn_in1_2(x)
+        x = self.conv1_2(x)  # 1*1 conv
+
+        ir = x[:, : self.halfdim, :, :]
+        rgb = x[:, self.halfdim :, :, :]
+
+        ### rgb part
+        residual_rgb = rgb
+        rgb= self.conv(self.norm_conv1(rgb))
+
+        rgb = residual_rgb + rgb  # bn+3*3 dwconv
+
+        ### ir part
+        ir = nn.functional.interpolate(ir, size=(H // self.downsample, W // self.downsample), mode="bilinear")
+        B, C, H_down, W_down = ir.shape  # [B, C, H/2, W/2]
+        ir = ir.flatten(2).transpose(1, 2)  # [B, HW/4, C]
+        residual_ir = ir
+        ir = self.norm_ir1(ir)
+        ir = self.channel_up(ir)  # [B, HW/4, 3C]
+        ir = residual_ir + self.attn(ir)
+
+        ### common part
+        stable = self.convdown(x)  # [B, C, H, W]
+        stable_rgb_ir = nn.functional.interpolate(
+            stable, size=(H // (4 * self.downsample), W // (4 * self.downsample)), mode="bilinear"
+        )  # [B, C, H/8, W/8]
+
+        B, C, H_down1, W_down1 = stable_rgb_ir.shape
+        stable_rgb_ir = stable_rgb_ir.flatten(2).transpose(1, 2)  # [B, HW/64, C]
+        residual_rgb_ir = stable_rgb_ir
+        stable_rgb_ir = self.norm_rgb_ir(stable_rgb_ir)
+        stable_rgb_ir = self.channel_up_rgb_ir(stable_rgb_ir)  # [B, HW/64, 3C]
+        stable_rgb_ir = residual_rgb_ir + self.attn_rgb_ir(stable_rgb_ir)  # [B, HW/64, C]
+
+        ### cross attention ###
+        residual_rgb_co = rgb
+        residual_ir_co = ir
+        residual_stable_co = stable_rgb_ir
+        rgb_qkv = self.cross_channel_up_rgb(self.norm_conv2(rgb))  # [B, 3C, H, W]
+        rgb_qkv = rgb_qkv.flatten(2).transpose(1, 2)  # [B, HW, 3C]
+
+        ir_qkv = self.cross_channel_up_ir(self.norm_ir2(ir))  # [B, HW/4, 3C]
+        stable_rgb_ir_qkv = self.cross_channel_up_rgb_ir(self.norm_rgb_ir2(stable_rgb_ir))  # [B, HW/64, 3C]
+
+        ####rgb_qkv####
+        B_rgb, N_rgb, C_rgb = rgb_qkv.shape  # B, HW, 3C
+        C_rgb = int(C_rgb // 3)  # C
+        rgb_qkv = rgb_qkv.reshape(B_rgb, N_rgb, 3, self.num_heads, C_rgb // self.num_heads).permute(
+            2, 0, 3, 1, 4
+        )  # [3, B, num_head, HW, 3C/num_head]
+        rgb_q, rgb_k, rgb_v = rgb_qkv[0], rgb_qkv[1], rgb_qkv[2]  # [B, num_head, HW, 3C/num_head]
+
+        ####ir_qkv####
+        B_ir, N_ir, C_ir = ir_qkv.shape  # B, HW/4, 3C
+        C_ir = int(C_ir // 3)  # C
+        # [3, B, num_head, HW/4, 3C/num_head]
+        ir_qkv = ir_qkv.reshape(B_ir, N_ir, 3, self.num_heads, C_ir // self.num_heads).permute(2, 0, 3, 1, 4)   
+        ir_q, ir_k, ir_v = ir_qkv[0], ir_qkv[1], ir_qkv[2]  # [B, num_head, HW/4, 3C/num_head]
+
+        ###common_qkv###
+        B_rgb_ir, N_rgb_ir, C_rgb_ir = stable_rgb_ir_qkv.shape  # [B, HW/64, 3C]
+        C_rgb_ir = int(C_rgb_ir // 3)
+        stable_qkv = stable_rgb_ir_qkv.reshape(
+            B_rgb_ir, N_rgb_ir, 3, self.num_heads, C_rgb_ir // self.num_heads
+        ).permute(2, 0, 3, 1, 4)
+        stable_q, stable_k, stable_v = stable_qkv[0], stable_qkv[1], stable_qkv[2]  # [B, num_head, HW/64, 3C/num_head]
+
+        # stable -> rgb
+        rgb = self.cross_attn_rgb(rgb_q, stable_k, stable_v, shape=(B_rgb, N_rgb, C_rgb))
+        rgb = self.fuse_channel_rgb(rgb)
+        rgb = rgb.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()     
+        rgb = residual_rgb_co + rgb     # [B, C, H, W]
+
+        # rgb -> stable
+        stable_rgb = self.cross_attn_stable_rgb(stable_q, rgb_k, rgb_v, shape=(B_rgb_ir, N_rgb_ir, C_rgb_ir))
+        stable_rgb = self.fuse_channel_stable_rgb(stable_rgb)   # [B, HW/64, C] 
+
+        # ir -> stable
+        stable_ir = self.cross_attn_stable_ir(stable_q, ir_k, ir_v, shape=(B_rgb_ir, N_rgb_ir, C_rgb_ir))
+        stable_ir = self.fuse_channel_stable_ir(stable_ir)     # [B, HW/64, C] 
+
+        ##fuse##
+        stable_rgb_ir = residual_stable_co + stable_rgb + stable_ir     # [B, HW/64, C]
+
+        # stable -> ir
+        ir = self.cross_attn_ir(ir_q, stable_k, stable_v, shape=(B_ir, N_ir, C_ir))
+        ir = residual_ir_co + self.fuse_channel_ir(ir)      # [B, HW/4, C]
+        ir = ir.reshape(B, H_down, W_down, -1).permute(0, 3, 1, 2).contiguous()     # [B, C, H/2, W/2]
+        ir = nn.functional.interpolate(ir, size=(H, W), mode="bilinear")        # [B, C, H, W]
+
+        stable_rgb_ir = stable_rgb_ir.reshape(B, H_down1, W_down1, -1).permute(0, 3, 1, 2).contiguous() # [B, C, H/8, W/8]
+        stable_rgb_ir = nn.functional.interpolate(stable_rgb_ir, size=(H, W), mode="bilinear")  # [B, C, H, W]
+        x = torch.cat([rgb, ir, stable_rgb_ir], dim=1)      # [B, 3C, H, W]
+
+        x = residual + self.drop_path(self.conv2(x))
+        x = x + self.drop_path(self.mlp(self.tri_attn_out(self.norm2(x))))     # [B, 2C, H, W]
+
+        x1 = x[:, : self.halfdim, :, :]
+        x2 = x[:, self.halfdim :, :, :]
+
+        return x1, x2
+class transfusionLayer3(nn.Module):
+    def __init__(self, dim, num_heads, depth, downsample=2):
+        super().__init__()
+        self.dim = dim
+
+        self.blocks = nn.ModuleList(
+            [
+                transfusionBlock_TriAttn3(
+                    dim,
+                    num_heads,
+                    downsample=2,
+                    mlp_ratio=4.0,
+                    qkv_bias=False,
+                    qk_scale=None,
+                    drop=0.0,
+                    attn_drop=0.0,
+                    drop_path=0.0,
+                    act_layer=nn.GELU,
+                    norm_layer=nn.LayerNorm,
+                )
+                for i in range(depth)
+            ]
+        )
+
+    def forward(self, x):
+        for blk in self.blocks:
+            x = blk(x)
+        x1 = x[0]
+        x2 = x[1]
+        return x1, x2

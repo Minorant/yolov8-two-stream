@@ -42,6 +42,10 @@ from .block import (
     ResNetLayer,
     ContrastiveHead,
     BNContrastiveHead,
+    InitConv1,
+    transfusionLayer3,
+    
+    
 )
 from .conv import (
     InitConv,

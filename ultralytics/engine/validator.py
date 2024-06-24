@@ -209,7 +209,12 @@ class BaseValidator:
         self.run_callbacks("on_val_end")
         if self.training:
             model.float()
-            results = {**stats, **trainer.label_loss_items(self.loss.cpu() / len(self.dataloader), prefix="val")}
+            # save every cls
+            cls_metric = {}
+            for i, c in enumerate(self.metrics.ap_class_index):
+                for tag,class_result in zip(list(stats.keys())[:-1],self.metrics.class_result(i)):
+                    cls_metric.update({f"{tag}_{self.names[c]}" : class_result})
+            results = {**stats, **trainer.label_loss_items(self.loss.cpu() / len(self.dataloader), prefix="val"),**cls_metric}
             return {k: round(float(v), 5) for k, v in results.items()}  # return results as 5 decimal place floats
         else:
             LOGGER.info(
