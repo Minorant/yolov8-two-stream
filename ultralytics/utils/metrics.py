@@ -573,6 +573,7 @@ def ap_per_class(
 
     # Average precision, precision and recall curves
     ap, p_curve, r_curve = np.zeros((nc, tp.shape[1])), np.zeros((nc, 1000)), np.zeros((nc, 1000))
+    p_curve_25, r_curve_25 = np.zeros((nc, 1000)), np.zeros((nc, 1000))
     for ci, c in enumerate(unique_classes):
         i = pred_cls == c
         n_l = nt[ci]  # number of labels
@@ -586,11 +587,13 @@ def ap_per_class(
 
         # Recall
         recall = tpc / (n_l + eps)  # recall curve
-        r_curve[ci] = np.interp(-x, -conf[i], recall[:, 0], left=0)  # negative x, xp because xp decreases
+        r_curve[ci] = np.interp(-x, -conf[i], recall[:, 5], left=0)  # negative x, xp because xp decreases
+        r_curve_25[ci] = np.interp(-x, -conf[i], recall[:, 0], left=0)  # negative x, xp because xp decreases
 
         # Precision
         precision = tpc / (tpc + fpc)  # precision curve
-        p_curve[ci] = np.interp(-x, -conf[i], precision[:, 0], left=1)  # p at pr_score
+        p_curve[ci] = np.interp(-x, -conf[i], precision[:, 5], left=1)  # p at pr_score
+        p_curve_25[ci] = np.interp(-x, -conf[i], precision[:, 0], left=1)  # p at pr_score
 
         # AP from recall-precision curve
         for j in range(tp.shape[1]):
@@ -602,6 +605,7 @@ def ap_per_class(
 
     # Compute F1 (harmonic mean of precision and recall)
     f1_curve = 2 * p_curve * r_curve / (p_curve + r_curve + eps)
+    f1_curve_25 = 2 * p_curve_25 * r_curve_25 / (p_curve_25 + r_curve_25 + eps)
     names = [v for k, v in names.items() if k in unique_classes]  # list: only classes that have data
     names = dict(enumerate(names))  # to dict
     if plot:
@@ -611,10 +615,14 @@ def ap_per_class(
         plot_mc_curve(x, r_curve, save_dir / f"{prefix}R_curve.png", names, ylabel="Recall", on_plot=on_plot)
 
     i = smooth(f1_curve.mean(0), 0.1).argmax()  # max F1 index
+    i_25 = smooth(f1_curve_25.mean(0), 0.1).argmax()  # max F1 index
+
     p, r, f1 = p_curve[:, i], r_curve[:, i], f1_curve[:, i]  # max-F1 precision, recall, F1 values
+    p_25, r_25, f1_25 = p_curve_25[:, i_25], r_curve_25[:, i_25], f1_curve_25[:, i_25]  # max-F1 precision, recall, F1 values
+
     tp = (r * nt).round()  # true positives
     fp = (tp / (p + eps) - tp).round()  # false positives
-    return tp, fp, p, r, f1, ap, unique_classes.astype(int), p_curve, r_curve, f1_curve, x, prec_values
+    return tp, fp, p, r, f1, ap, unique_classes.astype(int), p_curve, r_curve, f1_curve, x, prec_values,p_25,r_25
 
 
 class Metric(SimpleClass):
@@ -652,6 +660,9 @@ class Metric(SimpleClass):
         self.all_ap = []  # (nc, 10)
         self.ap_class_index = []  # (nc, )
         self.nc = 0
+        self.p_25 = []
+        self.r_25 = []
+
 
     @property
     def ap50(self):
@@ -661,8 +672,16 @@ class Metric(SimpleClass):
         Returns:
             (np.ndarray, list): Array of shape (nc,) with AP50 values per class, or an empty list if not available.
         """
-        return self.all_ap[:, 0] if len(self.all_ap) else []
+        return self.all_ap[:, 5] if len(self.all_ap) else []
+    @property
+    def ap25(self):
+        """
+        Returns the Average Precision (AP) at an IoU threshold of 0.5 for all classes.
 
+        Returns:
+            (np.ndarray, list): Array of shape (nc,) with AP50 values per class, or an empty list if not available.
+        """
+        return self.all_ap[:, 0] if len(self.all_ap) else []
     @property
     def ap(self):
         """
@@ -671,7 +690,7 @@ class Metric(SimpleClass):
         Returns:
             (np.ndarray, list): Array of shape (nc,) with AP50-95 values per class, or an empty list if not available.
         """
-        return self.all_ap.mean(1) if len(self.all_ap) else []
+        return self.all_ap[:, 5:].mean(1) if len(self.all_ap) else []
 
     @property
     def mp(self):
@@ -682,7 +701,15 @@ class Metric(SimpleClass):
             (float): The mean precision of all classes.
         """
         return self.p.mean() if len(self.p) else 0.0
+    @property
+    def mp_25(self):
+        """
+        Returns the Mean Precision of all classes.
 
+        Returns:
+            (float): The mean precision of all classes.
+        """
+        return self.p_25.mean() if len(self.p) else 0.0
     @property
     def mr(self):
         """
@@ -692,7 +719,24 @@ class Metric(SimpleClass):
             (float): The mean recall of all classes.
         """
         return self.r.mean() if len(self.r) else 0.0
+    @property
+    def mr_25(self):
+        """
+        Returns the Mean Recall of all classes.
 
+        Returns:
+            (float): The mean recall of all classes.
+        """
+        return self.r_25.mean() if len(self.r) else 0.0
+    @property
+    def map25(self):
+        """
+        Returns the mean Average Precision (mAP) at an IoU threshold of 0.5.
+
+        Returns:
+            (float): The mAP at an IoU threshold of 0.5.
+        """
+        return self.all_ap[:, 0].mean() if len(self.all_ap) else 0.0
     @property
     def map50(self):
         """
@@ -701,7 +745,7 @@ class Metric(SimpleClass):
         Returns:
             (float): The mAP at an IoU threshold of 0.5.
         """
-        return self.all_ap[:, 0].mean() if len(self.all_ap) else 0.0
+        return self.all_ap[:, 5].mean() if len(self.all_ap) else 0.0
 
     @property
     def map75(self):
@@ -711,7 +755,7 @@ class Metric(SimpleClass):
         Returns:
             (float): The mAP at an IoU threshold of 0.75.
         """
-        return self.all_ap[:, 5].mean() if len(self.all_ap) else 0.0
+        return self.all_ap[:, 10].mean() if len(self.all_ap) else 0.0
 
     @property
     def map(self):
@@ -721,15 +765,15 @@ class Metric(SimpleClass):
         Returns:
             (float): The mAP over IoU thresholds of 0.5 - 0.95 in steps of 0.05.
         """
-        return self.all_ap.mean() if len(self.all_ap) else 0.0
+        return self.all_ap[:,5:].mean() if len(self.all_ap) else 0.0
 
     def mean_results(self):
         """Mean of results, return mp, mr, map50, map."""
-        return [self.mp, self.mr, self.map50, self.map]
+        return [2*(self.mr_25* self.mp_25)/(self.mr_25+ self.mp_25), 2*(self.mr* self.mp)/(self.mr+ self.mp), self.map25, self.map50]
 
     def class_result(self, i):
         """Class-aware result, return p[i], r[i], ap50[i], ap[i]."""
-        return self.p[i], self.r[i], self.ap50[i], self.ap[i]
+        return 2*(self.p_25[i] * self.r_25[i])/(self.p_25[i] + self.r_25[i]), 2*(self.p[i] * self.r[i])/(self.p[i] + self.r[i]), self.ap25[i],self.ap50[i]
 
     @property
     def maps(self):
@@ -741,7 +785,7 @@ class Metric(SimpleClass):
 
     def fitness(self):
         """Model fitness as a weighted combination of metrics."""
-        w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
+        w = [0.0, 0.0, 0.0, 0.1]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
         return (np.array(self.mean_results()) * w).sum()
 
     def update(self, results):
@@ -771,6 +815,8 @@ class Metric(SimpleClass):
             self.f1_curve,
             self.px,
             self.prec_values,
+            self.p_25,
+            self.r_25
         ) = results
 
     @property
@@ -849,7 +895,7 @@ class DetMetrics(SimpleClass):
     @property
     def keys(self):
         """Returns a list of keys for accessing specific metrics."""
-        return ["metrics/precision(B)", "metrics/recall(B)", "metrics/mAP50(B)", "metrics/mAP50-95(B)"]
+        return ["f1-25", "f1-50", "metrics/mAP25(B)","metrics/mAP50(B)", "metrics/mAP50-95(B)"]
 
     def mean_results(self):
         """Calculate mean of detected objects & return precision, recall, mAP50, and mAP50-95."""

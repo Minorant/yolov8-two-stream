@@ -36,7 +36,7 @@ class DetectionValidator(BaseValidator):
         self.class_map = None
         self.args.task = "detect"
         self.metrics = DetMetrics(save_dir=self.save_dir, on_plot=self.on_plot)
-        self.iouv = torch.linspace(0.5, 0.95, 10)  # IoU vector for mAP@0.5:0.95
+        self.iouv = torch.linspace(0.25, 0.95, 15)  # IoU vector for mAP@0.5:0.95
         self.niou = self.iouv.numel()
         self.lb = []  # for autolabelling
 
@@ -79,7 +79,7 @@ class DetectionValidator(BaseValidator):
 
     def get_desc(self):
         """Return a formatted string summarizing class metrics of YOLO model."""
-        return ("%22s" + "%11s" * 6) % ("Class", "Images", "Instances", "Box(P", "R", "mAP50", "mAP50-95)")
+        return ("%22s" + "%11s" * 6) % ("Class", "Images", "Instances", "F1-25", "F1-50", "mAP25", "mAP50")
 
     def postprocess(self, preds):
         """Apply Non-maximum suppression to prediction outputs."""
@@ -114,7 +114,7 @@ class DetectionValidator(BaseValidator):
         )  # native-space pred
         return predn
 
-    def update_metrics(self, preds, batch):
+    def update_metrics(self, preds, batch,per_image_metrics = None):
         """Metrics."""
         for si, pred in enumerate(preds):
             self.seen += 1
@@ -157,7 +157,23 @@ class DetectionValidator(BaseValidator):
             if self.args.save_txt:
                 file = self.save_dir / "labels" / f'{Path(batch["im_file"][si]).stem}.txt'
                 self.save_one_txt(predn, self.args.save_conf, pbatch["ori_shape"], file)
-
+            # Save/log per-image metrics
+            if per_image_metrics is not None:
+                paths = batch["im_file"]
+                path = Path(paths[si])
+                image_id = int(path.stem) if path.stem.isnumeric() else path.stem
+                image_tp = stat["tp"][:,0].sum().item()
+                image_fp = npr - image_tp
+                image_fn = nl - image_tp
+                image_precision = image_tp / (image_tp + image_fp) if image_tp + image_fp > 0 else 0
+                image_recall = image_tp / (image_tp + image_fn) if image_tp + image_fn > 0 else 0
+                per_image_metrics[image_id] = {
+                    'precision': image_precision,
+                    'recall': image_recall,
+                    'tp': image_tp,
+                    'fp': image_fp,
+                    'fn': image_fn
+                }
     def finalize_metrics(self, *args, **kwargs):
         """Set final values for metrics speed and confusion matrix."""
         self.metrics.speed = self.speed
@@ -175,13 +191,13 @@ class DetectionValidator(BaseValidator):
 
     def print_results(self):
         """Prints training/validation set metrics per class."""
-        pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
+        pf = "%22s" + "%11i" * 2 + "%11.3g" * (len(self.metrics.keys) -1 )  # print format
         LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(f"WARNING ⚠️ no labels found in {self.args.task} set, can not compute metrics without labels")
 
         # Print results per class
-        if self.args.verbose and not self.training and self.nc > 1 and len(self.stats):
+        if self.args.verbose  and self.nc > 1 and len(self.stats):
             for i, c in enumerate(self.metrics.ap_class_index):
                 LOGGER.info(pf % (self.names[c], self.seen, self.nt_per_class[c], *self.metrics.class_result(i)))
 

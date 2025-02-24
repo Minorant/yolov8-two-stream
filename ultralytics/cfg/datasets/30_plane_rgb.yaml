@@ -1,0 +1,20 @@
+train: [
+  '/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/boat/rgb/images/train',
+  "/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/car/opt/images/train",
+  "/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/pedestrain/opt/images/train",
+  "/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/plane/30_shot_1/opt/images/train",
+]
+
+val: [
+  '/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/boat/rgb/images/val',
+  "/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/car/opt/images/val",
+  "/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/pedestrain/opt/images/val",
+  "/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/plane/30_shot_1/opt/images/val",
+]
+
+
+
+# number of classes
+nc: 10
+# class names
+names: [ 'car','truck','van','coach','specialty vehicle','plane',"pedestrain","boat","",""]

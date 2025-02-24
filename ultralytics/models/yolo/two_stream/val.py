@@ -37,7 +37,7 @@ class TwoStreamDetectionValidator(BaseValidator):
         self.class_map = None
         self.args.task = "two_stream"
         self.metrics = DetMetrics(save_dir=self.save_dir, on_plot=self.on_plot)
-        self.iouv = torch.linspace(0.5, 0.95, 10)  # IoU vector for mAP@0.5:0.95
+        self.iouv = torch.linspace(0.25, 0.95, 15)  # IoU vector for mAP@0.5:0.95
         self.niou = self.iouv.numel()
         self.lb = []  # for autolabelling
 
@@ -80,7 +80,7 @@ class TwoStreamDetectionValidator(BaseValidator):
 
     def get_desc(self):
         """Return a formatted string summarizing class metrics of YOLO model."""
-        return ("%22s" + "%11s" * 6) % ("Class", "Images", "Instances", "Box(P", "R", "mAP50", "mAP50-95)")
+        return ("%22s" + "%11s" * 7) % ("Class", "Images", "Instances", "Box(P", "R", "mAP25","mAP50", "mAP50-95)")
 
     def postprocess(self, preds):
         """Apply Non-maximum suppression to prediction outputs."""
@@ -227,7 +227,7 @@ class TwoStreamDetectionValidator(BaseValidator):
                                         path2,
                                         batch,
                                         mode,
-                                        rect=mode == "val",
+                                        rect=False,
                                         stride=self.stride)
 
     def get_two_stream_dataloader(self, path1, path2, batch_size=16):

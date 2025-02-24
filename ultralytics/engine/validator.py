@@ -175,7 +175,10 @@ class BaseValidator:
         bar = TQDM(self.dataloader, desc=self.get_desc(), total=len(self.dataloader))
         self.init_metrics(de_parallel(model))
         self.jdict = []  # empty before each val
+        per_image_metrics = {}
         for batch_i, batch in enumerate(bar):
+            # if batch["img"].size(0) != 16:
+            #     continue
             self.run_callbacks("on_val_batch_start")
             self.batch_i = batch_i
             # Preprocess
@@ -195,12 +198,22 @@ class BaseValidator:
             with dt[3]:
                 preds = self.postprocess(preds)
 
-            self.update_metrics(preds, batch)
+            self.update_metrics(preds, batch,per_image_metrics)
             if self.args.plots and batch_i < 3:
                 self.plot_val_samples(batch, batch_i)
                 self.plot_predictions(batch, preds, batch_i)
 
             self.run_callbacks("on_val_batch_end")
+        # pp = rr = cnt = 0
+        # for image_id, metrics in per_image_metrics.items():
+        #     if "image" in str(image_id):
+        #         pp += metrics["precision"]
+        #         rr += metrics["recall"]
+        #         cnt += 1
+        #         # LOGGER.info(f'Image {image_id}: Precision {metrics["precision"]:.4f}, Recall {metrics["recall"]:.4f}, '
+        #         #             f'TP {metrics["tp"]}, FP {metrics["fp"]}, FN {metrics["fn"]}')
+        #         LOGGER.info(f'{image_id}, Accuracy:{metrics["recall"]:.4f}')
+        # print(pp / cnt,rr/cnt)
         stats = self.get_stats()
         self.check_stats(stats)
         self.speed = dict(zip(self.speed.keys(), (x.t / len(self.dataloader.dataset) * 1e3 for x in dt)))
