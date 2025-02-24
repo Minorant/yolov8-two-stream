@@ -1,13 +1,35 @@
+import torch 
+import torch_npu 
+import argparse
+# import torch
 from ultralytics import YOLO
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
-# Load a model
-model = YOLO('/home/xxf/xxf/code/yolov8-two-stream/runs/xingren/exp2/weights/best.pt')  # load an official model
-# model = YOLO('path/to/best.pt')  # load a custom model
+from torch_npu.contrib import transfer_to_npu
 
-# Validate the model
-metrics = model.val()  # no arguments needed, dataset and settings remembered
-metrics.box.map    # map50-95
-metrics.box.map50  # map50
-metrics.box.map75  # map75
-metrics.box.maps   # a list contains map50-95 of each category
+def parse_args():
+    parser = argparse.ArgumentParser(description="YOLO Training Script")
+    parser.add_argument('--gpu', type=str, default="0", help='CUDA device ID')
+    parser.add_argument('--data', type=str,  help='Path to the data configuration file',default="/home/xxf/xxf/code/yolov9/data/che_10.yaml")
+    parser.add_argument('--project', type=str, default='runs/sb', help='Project name')
+    parser.add_argument('--weight', type=str, default='', help='Project name') #"runs/10_sar/exp8/weights/epoch300.pt"
+
+    args = parser.parse_args()
+    return args
+args = parse_args()
+os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+# Load a model
+model_path = args.weight
+# model = YOLO(model_path)  # load an official model
+model = YOLO(model_path)
+
+checkpoint = torch.load(model_path, map_location='cpu')
+
+
+# if 'epoch' in checkpoint:
+#     print(f"Epoch: {checkpoint['epoch']}")
+# else:
+#     print("Epoch information not found in the checkpoint.") 
+
+del checkpoint
+print(model_path)
+metrics = model.val(rect=False, data=args.data)  # no arguments needed, dataset and settings remembered
