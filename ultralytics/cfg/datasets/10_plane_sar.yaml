@@ -1,15 +1,15 @@
 train: [
-  '/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/boat/nir/images/train',
-  "/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/car/sar/images/train",
-  "/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/pedestrain/inf/images/train",
-  "/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/plane/10_shot_1/sar/images/train",
+  'yolo_dataset_2/boat/nir/images/train',
+  "yolo_dataset_2/car/sar/images/train",
+  "yolo_dataset_2/pedestrain/inf/images/train",
+  "yolo_dataset_2/plane/10_shot_1/sar/images/train",
 ]
 
 val: [
-  '/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/boat/nir/images/val',
-  "/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/car/sar/images/val",
-  "/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/pedestrain/inf/images/val",
-  "/home/xxf/xxf/code/yolov8-two-stream/yolo_dataset_2/plane/10_shot_1/sar/images/val",
+  'yolo_dataset_2/boat/nir/images/val',
+  "yolo_dataset_2/car/sar/images/val",
+  "yolo_dataset_2/pedestrain/inf/images/val",
+  "yolo_dataset_2/plane/10_shot_1/sar/images/val",
 ]
 
 
