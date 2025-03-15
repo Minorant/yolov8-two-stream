@@ -12,7 +12,18 @@ from ultralytics.utils import LOGGER, ops
 from ultralytics.utils.checks import check_requirements
 from ultralytics.utils.metrics import ConfusionMatrix, DetMetrics, box_iou
 from ultralytics.utils.plotting import output_to_target, plot_images
+def compute_f1(tp, fp, gt):
+    if tp + fp == 0 or gt == 0:
+        return 0.0  # 避免除零错误
 
+    precision = tp / (tp + fp)
+    recall = tp / gt
+    
+    if precision + recall == 0:
+        return 0.0  # 避免除零错误
+
+    f1 = 2 * (precision * recall) / (precision + recall)
+    return f1
 
 class DetectionValidator(BaseValidator):
     """
@@ -79,7 +90,7 @@ class DetectionValidator(BaseValidator):
 
     def get_desc(self):
         """Return a formatted string summarizing class metrics of YOLO model."""
-        return ("%22s" + "%11s" * 6) % ("Class", "Images", "Instances", "F1-25", "F1-50", "mAP25", "mAP50")
+        return ("%22s" + "%11s" * 8) % ("Class", "Images", "Instances","TP","FP", "F1-25", "F1-50", "mAP25", "mAP50")
 
     def postprocess(self, preds):
         """Apply Non-maximum suppression to prediction outputs."""
@@ -191,15 +202,17 @@ class DetectionValidator(BaseValidator):
 
     def print_results(self):
         """Prints training/validation set metrics per class."""
-        pf = "%22s" + "%11i" * 2 + "%11.3g" * (len(self.metrics.keys) -1 )  # print format
-        LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
+        pf = "%22s" + "%11i" * 4 + "%11.3g" * (len(self.metrics.keys) -1 )  # print format
+        # LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *[1 - i for i in self.metrics.mean_results()]))
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(f"WARNING ⚠️ no labels found in {self.args.task} set, can not compute metrics without labels")
 
         # Print results per class
         if self.args.verbose  and self.nc > 1 and len(self.stats):
             for i, c in enumerate(self.metrics.ap_class_index):
-                LOGGER.info(pf % (self.names[c], self.seen, self.nt_per_class[c], *self.metrics.class_result(i)))
+                if self.names[c] == "plane":
+                    tp_50,fp_50,tp_25,fp_25 = self.metrics.class_result(i)[:4]
+                    LOGGER.info(pf % (self.names[c], self.seen, self.nt_per_class[c],tp_50,fp_50,1 - compute_f1(tp_25,fp_25,self.nt_per_class[c]),1 - compute_f1(tp_50,fp_50,self.nt_per_class[c]) ,*[1 - i for i in self.metrics.class_result(i)[6:]]))
 
         if self.args.plots:
             for normalize in True, False:

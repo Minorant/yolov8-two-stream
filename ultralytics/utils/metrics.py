@@ -622,7 +622,9 @@ def ap_per_class(
 
     tp = (r * nt).round()  # true positives
     fp = (tp / (p + eps) - tp).round()  # false positives
-    return tp, fp, p, r, f1, ap, unique_classes.astype(int), p_curve, r_curve, f1_curve, x, prec_values,p_25,r_25
+    tp_25 = (r_25 * nt).round()  # true positives
+    fp_25 = (tp_25 / (p_25 + eps) - tp_25).round()  # false positives
+    return tp, fp,tp_25,fp_25, p, r, f1, ap, unique_classes.astype(int), p_curve, r_curve, f1_curve, x, prec_values,p_25,r_25
 
 
 class Metric(SimpleClass):
@@ -654,6 +656,10 @@ class Metric(SimpleClass):
 
     def __init__(self) -> None:
         """Initializes a Metric instance for computing evaluation metrics for the YOLOv8 model."""
+        self.tp = []
+        self.fp = []
+        self.tp_25 = []
+        self.fp_25 = []
         self.p = []  # (nc, )
         self.r = []  # (nc, )
         self.f1 = []  # (nc, )
@@ -773,7 +779,7 @@ class Metric(SimpleClass):
 
     def class_result(self, i):
         """Class-aware result, return p[i], r[i], ap50[i], ap[i]."""
-        return 2*(self.p_25[i] * self.r_25[i])/(self.p_25[i] + self.r_25[i]), 2*(self.p[i] * self.r[i])/(self.p[i] + self.r[i]), self.ap25[i],self.ap50[i]
+        return self.tp[i],self.fp[i],self.tp_25[i],self.fp_25[i],2*(self.p_25[i] * self.r_25[i])/(self.p_25[i] + self.r_25[i]), 2*(self.p[i] * self.r[i])/(self.p[i] + self.r[i]), self.ap25[i],self.ap50[i]
 
     @property
     def maps(self):
@@ -805,6 +811,10 @@ class Metric(SimpleClass):
             on the values provided in the `results` tuple.
         """
         (
+            self.tp,
+            self.fp,
+            self.tp_25,
+            self.fp_25,
             self.p,
             self.r,
             self.f1,
@@ -888,7 +898,7 @@ class DetMetrics(SimpleClass):
             save_dir=self.save_dir,
             names=self.names,
             on_plot=self.on_plot,
-        )[2:]
+        )
         self.box.nc = len(self.names)
         self.box.update(results)
 
